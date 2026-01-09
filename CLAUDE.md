@@ -8,8 +8,10 @@
 
 ## 📌 현재 진행 상황 (Current Context)
 * **단계:** 시스템 고도화 및 소스 확장 (Phase 2)
-* **현재 작업:** `NewsAgent` 구현 및 DB 스키마 일반화
-* **최근 이슈:** DART 중심의 DB 구조를 뉴스/웹 수집 구조로 변경 필요
+* **현재 작업:** AI 생성 리포트 저장소 구축 완료 (Task 011)
+* **최근 업데이트:** 
+  - Generated_Reports 테이블 생성 및 데이터 삽입 인터페이스 구현
+  - 효율적인 DART 보고서 검색 방식 구현 (Task 010)
 
 ---
 
@@ -32,6 +34,36 @@ python main.py
 ---
 
 ## 🐛 오류 및 해결 로그 (Issue & Solution Log)
+
+### [2026-01-09] Task 011: Generated_Reports 테이블 구축
+
+* **작업:** AI 생성 리포트 저장소 구축
+* **구현 내용:**
+  - `Generated_Reports` 테이블 생성 (10개 컬럼, JSONB 활용)
+  - `insert_generated_report()` 메서드 구현
+  - DB 통계에 `generated_reports` 항목 추가
+  - 테스트 스크립트 작성 및 검증 완료
+* **관련 파일:** 
+  - `src/core/db_manager.py`
+  - `scripts/test_generated_reports.py`
+  - `docs/TASK_011_GENERATED_REPORTS.md`
+* **검증 결과:** ✅ 모든 테스트 통과
+
+### [2026-01-09] Task 010: 효율적인 DART 보고서 검색
+
+* **이슈:** 기존 방식은 전체 상장사(~2,600개)를 순회하며 개별 API 호출 (비효율)
+* **해결:** 
+  - `dart.filings.search()` 기반 기간별 일괄 검색 방식 구현
+  - `search_all_reports()` 메서드 신규 추가
+  - `get_corps_with_reports()` 메서드 리팩토링
+  - `run_efficient()` 파이프라인 메서드 추가
+  - Report 객체 속성 접근 방식 수정 (`.get()` → `getattr()`)
+* **결과:** API 호출 횟수 90% 이상 감소, 실행 시간 대폭 단축
+* **관련 파일:** 
+  - `src/core/dart_agent.py`
+  - `src/core/pipeline.py`
+  - `config.py`
+  - `main.py`
 
 ### [Template]
 

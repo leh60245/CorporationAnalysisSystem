@@ -156,6 +156,11 @@ python scripts/check_db.py --sample     # 샘플 데이터 조회
 python scripts/check_db.py --tables     # 테이블 샘플 조회
 ```
 
+#### Generated_Reports 테이블 검증
+```bash
+python scripts/test_generated_reports.py  # AI 리포트 테이블 검증
+```
+
 #### 보고서 구조 탐색
 ```bash
 python scripts/explore_report_structure.py   # 대화형 모드
@@ -246,9 +251,27 @@ python main.py --explore
 |------|------|------|
 | id | SERIAL | PK |
 | report_id | INTEGER | FK → Analysis_Reports |
-| **chapter** | VARCHAR(200) | **상위 챕터** (예: "사업의 내용") |
-| section_name | VARCHAR(200) | 중위 섹션 (예: "1. 사업의 개요") |
-| **sub_section** | VARCHAR(200) | **하위 소섹션** (예: "가. 업계의 현황") |
+| **chunk_type** | VARCHAR(20) | **블록 타입** (text/table) |
+| section_path | TEXT | 섹션 경로 (예: "사업의 내용 > 1. 사업의 개요") |
+| sequence_order | INTEGER | 순서 번호 |
+| raw_content | TEXT | 텍스트 또는 테이블 내용 |
+| table_metadata | JSONB | 테이블 메타데이터 (구조, 컬럼 등) |
+| embedding | VECTOR | 임베딩 벡터 (768차원) |
+| metadata | JSONB | 추가 메타데이터 |
+
+### Generated_Reports (AI 생성 리포트) 🆕
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | SERIAL | PK |
+| company_name | VARCHAR(100) | 기업명 |
+| topic | TEXT | 리포트 주제 |
+| report_content | TEXT | 리포트 본문 (Markdown) |
+| toc_text | TEXT | 목차 |
+| references_data | JSONB | 참고 자료 데이터 |
+| conversation_log | JSONB | 대화 로그 |
+| meta_info | JSONB | 메타 정보 (토큰, 처리시간 등) |
+| model_name | VARCHAR(50) | 사용된 AI 모델 (기본: gpt-4o) |
+| created_at | TIMESTAMP | 생성 일시 |
 | chunk_index | INTEGER | 청크 순서 |
 | raw_content | TEXT | 텍스트 내용 |
 | **tables_json** | **JSONB** | **테이블 데이터** (분리 저장) |

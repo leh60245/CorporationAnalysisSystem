@@ -15,12 +15,11 @@ import json
 with DBManager() as db:
     # 저장된 데이터 샘플 조회
     db.cursor.execute('''
-        SELECT id, chapter, section_name, sub_section, chunk_index, 
-               LENGTH(raw_content) as content_len,
-               tables_json IS NOT NULL as has_tables
+        SELECT id, report_id, chunk_type, section_path, sequence_order, 
+               LENGTH(raw_content) as content_len
         FROM "Source_Materials" 
         WHERE report_id = 1
-        ORDER BY chapter, section_name, sub_section, chunk_index
+        ORDER BY report_id, sequence_order
         LIMIT 15
     ''')
     rows = db.cursor.fetchall()

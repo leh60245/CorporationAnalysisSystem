@@ -44,6 +44,7 @@ class DBManager:
         """[주의] 기존 테이블을 삭제하고 새로 만듭니다"""
         try:
             print("💥 기존 테이블 삭제 중...")
+            self.cursor.execute('DROP TABLE IF EXISTS "Generated_Reports" CASCADE;')
             self.cursor.execute('DROP TABLE IF EXISTS "Source_Materials" CASCADE;')
             self.cursor.execute('DROP TABLE IF EXISTS "Analysis_Reports" CASCADE;')
             self.cursor.execute('DROP TABLE IF EXISTS "Companies" CASCADE;')
@@ -120,6 +121,33 @@ class DBManager:
             self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_source_materials_chunk_type 
                 ON "Source_Materials"(report_id, chunk_type);
+            """)
+
+            # 4. AI 생성 리포트 테이블
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS "Generated_Reports" (
+                    id SERIAL PRIMARY KEY,
+                    company_name VARCHAR(100) NOT NULL,
+                    topic TEXT NOT NULL,
+                    report_content TEXT,
+                    toc_text TEXT,
+                    references_data JSONB,
+                    conversation_log JSONB,
+                    meta_info JSONB,
+                    model_name VARCHAR(50) DEFAULT 'gpt-4o',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # Generated_Reports 인덱스
+            self.cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reports_company 
+                ON "Generated_Reports"(company_name);
+            """)
+
+            self.cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reports_created 
+                ON "Generated_Reports"(created_at DESC);
             """)
 
             self.conn.commit()
@@ -350,6 +378,74 @@ class DBManager:
             for row in rows
         ]
 
+    # ==================== AI 생성 리포트 관리 ====================
+
+    def insert_generated_report(
+        self,
+        company_name: str,
+        topic: str,
+        report_content: str,
+        toc_text: str,
+        references_data: dict,
+        conversation_log: dict,
+        meta_info: dict,
+        model_name: str = 'gpt-4o'
+    ) -> Optional[int]:
+        """
+        AI가 생성한 리포트를 저장합니다.
+
+        Args:
+            company_name: 기업명
+            topic: 리포트 주제
+            report_content: 리포트 본문 (Markdown 등)
+            toc_text: 목차 텍스트
+            references_data: 참고 자료 데이터 (JSON)
+            conversation_log: 대화 로그 (JSON)
+            meta_info: 메타 정보 (JSON)
+            model_name: 사용된 AI 모델명 (기본: gpt-4o)
+
+        Returns:
+            int: 생성된 리포트 ID (성공 시) 또는 None (실패 시)
+        """
+        try:
+            sql = """
+                INSERT INTO "Generated_Reports" (
+                    company_name, topic, report_content, toc_text,
+                    references_data, conversation_log, meta_info, model_name
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id;
+            """
+
+            self.cursor.execute(
+                sql,
+                (
+                    company_name,
+                    topic,
+                    report_content,
+                    toc_text,
+                    Json(references_data),
+                    Json(conversation_log),
+                    Json(meta_info),
+                    model_name
+                )
+            )
+
+            result = self.cursor.fetchone()
+            self.conn.commit()
+
+            if result:
+                report_id = result[0]
+                print(f"✅ AI 생성 리포트 저장 완료 (ID: {report_id})")
+                return report_id
+            else:
+                return None
+
+        except Exception as e:
+            self.conn.rollback()
+            print(f"❌ AI 리포트 저장 실패 ({company_name} - {topic}): {e}")
+            return None
+
     # ==================== 유틸리티 ====================
 
     def get_stats(self) -> Dict:
@@ -370,6 +466,9 @@ class DBManager:
             WHERE embedding IS NOT NULL
         ''')
         stats['embedded_materials'] = self.cursor.fetchone()[0]
+
+        self.cursor.execute('SELECT COUNT(*) FROM "Generated_Reports"')
+        stats['generated_reports'] = self.cursor.fetchone()[0]
 
         return stats
 
