@@ -6,6 +6,8 @@ import dart_fss as dart
 from bs4 import BeautifulSoup, NavigableString, Tag
 import re
 import json
+import time
+from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO
 from typing import Optional, List, Dict, Tuple
@@ -51,21 +53,153 @@ class DartReportAgent:
         """상장 기업만 필터링 (사업보고서 존재 가능성 높음)"""
         return [c for c in self.corp_list if c.stock_code]
 
-    def get_corps_with_reports(self, bgn_de: str = None) -> List[Tuple]:
+    def search_all_reports(
+        self,
+        bgn_de: str = None,
+        end_de: str = None,
+        corp_code: str = None
+    ) -> List[Dict]:
         """
-        사업보고서가 있는 기업 목록 반환
+        기간 내 모든 사업보고서를 일괄 검색 (효율적인 방식)
+
+        corp_code가 없으면 검색 기간은 최대 3개월(90일)로 제한됩니다.
+
+        Args:
+            bgn_de: 검색 시작일 (YYYYMMDD), 기본값은 config에서 가져옴
+            end_de: 검색 종료일 (YYYYMMDD), 기본값은 오늘
+            corp_code: 특정 기업만 검색할 경우 법인코드 지정
 
         Returns:
-            List[Tuple]: (corp 객체, report 객체) 튜플 리스트
+            List[Dict]: 보고서 정보 딕셔너리 리스트
+                - corp_code, corp_name, stock_code, rcept_no, rcept_dt, report_nm 등
         """
-        bgn_de = bgn_de or REPORT_SEARCH_CONFIG['bgn_de']
-        listed_corps = self.get_listed_corps()
-        corps_with_reports = []
+        # 기본값 설정
+        if end_de is None:
+            end_de = datetime.now().strftime("%Y%m%d")
+        if bgn_de is None:
+            bgn_de = REPORT_SEARCH_CONFIG['bgn_de']
 
-        for corp in listed_corps:
-            report = self.get_annual_report(corp.corp_code, bgn_de)
-            if report:
+        # corp_code가 없으면 검색 기간을 최대 90일(3개월)로 제한
+        if corp_code is None:
+            max_days = REPORT_SEARCH_CONFIG.get('max_search_days', 90)
+            bgn_date = datetime.strptime(bgn_de, "%Y%m%d")
+            end_date = datetime.strptime(end_de, "%Y%m%d")
+
+            if (end_date - bgn_date).days > max_days:
+                bgn_date = end_date - timedelta(days=max_days)
+                bgn_de = bgn_date.strftime("%Y%m%d")
+                print(f"⚠️ corp_code 미지정: 검색 기간을 최대 {max_days}일로 제한 ({bgn_de} ~ {end_de})")
+
+        all_reports = []
+        page_no = 1
+        page_count = REPORT_SEARCH_CONFIG.get('page_count', 100)
+        page_delay = REPORT_SEARCH_CONFIG.get('page_delay_sec', 0.5)
+
+        print(f"📋 사업보고서 검색 시작: {bgn_de} ~ {end_de}")
+        if corp_code:
+            print(f"   대상 기업: {corp_code}")
+
+        while True:
+            try:
+                # dart.filings.search 사용 (기간 내 모든 사업보고서 검색)
+                search_kwargs = {
+                    'bgn_de': bgn_de,
+                    'end_de': end_de,
+                    'pblntf_detail_ty': REPORT_SEARCH_CONFIG['pblntf_detail_ty'],
+                    'page_count': page_count,
+                    'page_no': page_no
+                }
+
+                # corp_code가 있으면 특정 기업만 검색
+                if corp_code:
+                    search_kwargs['corp_code'] = corp_code
+
+                search_result = dart.filings.search(**search_kwargs)
+
+                # 결과 추출 (SearchResults 객체는 속성으로 접근)
+                report_list = getattr(search_result, 'report_list', []) or []
+                if not report_list:
+                    break
+
+                all_reports.extend(report_list)
+
+                total_page = getattr(search_result, 'total_page', 1) or 1
+                total_count = getattr(search_result, 'total_count', 0) or 0
+
+                print(f"   📄 Page {page_no}/{total_page}: {len(report_list)}건 (누적 {len(all_reports)}/{total_count})")
+
+                # 마지막 페이지면 종료
+                if page_no >= total_page:
+                    break
+
+                page_no += 1
+                time.sleep(page_delay)  # Rate Limiting
+
+            except Exception as e:
+                print(f"⚠️ 보고서 검색 오류 (page={page_no}): {e}")
+                break
+
+        print(f"✅ 검색 완료: 총 {len(all_reports)}건의 사업보고서")
+        return all_reports
+
+    def get_corps_with_reports(
+        self,
+        bgn_de: str = None,
+        end_de: str = None,
+        deduplicate: bool = True
+    ) -> List[Tuple]:
+        """
+        사업보고서가 있는 기업 목록 반환 (효율적인 일괄 검색 방식)
+
+        기존 방식: 전체 상장사 순회하며 개별 API 호출 (비효율)
+        새로운 방식: dart.filings.search로 기간 내 사업보고서 일괄 검색 (효율)
+
+        Args:
+            bgn_de: 검색 시작일 (YYYYMMDD)
+            end_de: 검색 종료일 (YYYYMMDD)
+            deduplicate: True면 기업당 최신 보고서 1건만 반환 (기본값)
+
+        Returns:
+            List[Tuple]: (corp 객체, report 딕셔너리) 튜플 리스트
+        """
+        # 일괄 검색으로 사업보고서 목록 가져오기
+        all_reports = self.search_all_reports(bgn_de=bgn_de, end_de=end_de)
+
+        if not all_reports:
+            return []
+
+        # 기업별 최신 보고서만 남기기 (중복 제거)
+        if deduplicate:
+            corp_latest = {}
+            for report in all_reports:
+                # Report 객체는 속성으로 접근 (딕셔너리가 아님)
+                corp_code = getattr(report, 'corp_code', None)
+                rcept_dt = getattr(report, 'rcept_dt', '')
+
+                if corp_code not in corp_latest:
+                    corp_latest[corp_code] = report
+                else:
+                    # 더 최신 보고서로 교체
+                    if rcept_dt > getattr(corp_latest[corp_code], 'rcept_dt', ''):
+                        corp_latest[corp_code] = report
+
+            reports_to_process = list(corp_latest.values())
+            print(f"📌 중복 제거 후: {len(reports_to_process)}개 기업")
+        else:
+            reports_to_process = all_reports
+
+        # (corp 객체, report 객체) 튜플 리스트 생성
+        corps_with_reports = []
+        for report in reports_to_process:
+            corp_code = getattr(report, 'corp_code', None)
+            corp = self.get_corp_by_corp_code(corp_code)
+
+            if corp:
                 corps_with_reports.append((corp, report))
+            else:
+                # corp_list에 없는 경우 (비상장사 등)
+                corp_name = getattr(report, 'corp_name', 'Unknown')
+                print(f"   ⚠️ 기업 정보 없음: {corp_name} ({corp_code})")
 
         return corps_with_reports
 

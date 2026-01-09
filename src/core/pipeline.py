@@ -3,7 +3,7 @@
 배치 처리, Rate Limiting, 에러 핸들링 담당
 """
 import time
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from datetime import datetime
 from config import BATCH_CONFIG
 from .db_manager import DBManager
@@ -114,6 +114,173 @@ class DataPipeline:
         """
         print("\n🌐 전체 기업 처리 모드")
         return self.run(stock_codes=None, reset_db=reset_db)
+
+    def run_efficient(
+        self,
+        bgn_de: str = None,
+        end_de: str = None,
+        reset_db: bool = False,
+        limit: Optional[int] = None
+    ):
+        """
+        효율적인 파이프라인 실행 - 사업보고서가 있는 기업만 처리
+
+        기존 방식: 전체 상장사 순회 → 개별 API 호출로 보고서 확인
+        새로운 방식: dart.filings.search로 기간 내 사업보고서 일괄 검색 후 처리
+
+        Args:
+            bgn_de: 검색 시작일 (YYYYMMDD)
+            end_de: 검색 종료일 (YYYYMMDD), 기본값은 오늘
+            reset_db: DB 초기화 여부
+            limit: 최대 처리 기업 수 (테스트용)
+        """
+        self.stats["start_time"] = datetime.now()
+
+        print("\n" + "=" * 60)
+        print("🚀 DART 데이터 파이프라인 시작 (효율 모드)")
+        print("=" * 60)
+        print(f"   시작 시간: {self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # 1. DB 초기화
+        with DBManager() as db:
+            if reset_db:
+                print("\n⚠️ DB 초기화 중...")
+                db.reset_db()
+            else:
+                db.init_db()
+
+        # 2. 사업보고서가 있는 기업 일괄 검색 (효율적)
+        print("\n📋 사업보고서가 있는 기업 검색 중...")
+        corps_with_reports = self.agent.get_corps_with_reports(bgn_de=bgn_de, end_de=end_de)
+
+        if limit:
+            corps_with_reports = corps_with_reports[:limit]
+
+        self.stats["total"] = len(corps_with_reports)
+        print(f"\n📋 대상 기업 수: {self.stats['total']} (사업보고서 보유 기업만)")
+
+        # 3. 배치 처리
+        batches = self._create_batches(corps_with_reports)
+        print(f"📦 배치 수: {len(batches)} (배치당 {BATCH_CONFIG['batch_size']}개)")
+
+        for batch_idx, batch in enumerate(batches):
+            print(f"\n{'─' * 50}")
+            print(f"📦 배치 {batch_idx + 1}/{len(batches)} 처리 중...")
+
+            self._process_batch_with_reports(batch, batch_idx, len(batches))
+
+            # 배치 간 딜레이 (마지막 배치 제외)
+            if batch_idx < len(batches) - 1:
+                delay = BATCH_CONFIG['batch_delay_sec']
+                print(f"   ⏳ 다음 배치까지 {delay}초 대기...")
+                time.sleep(delay)
+
+        # 4. 결과 요약
+        self.stats["end_time"] = datetime.now()
+        self._print_summary()
+
+        return self.stats
+
+    def _process_batch_with_reports(self, batch: List[Tuple], batch_idx: int, total_batches: int):
+        """
+        사전 검색된 보고서 정보를 포함한 배치 처리
+
+        Args:
+            batch: (corp 객체, report 딕셔너리) 튜플 리스트
+        """
+        for idx, (corp, report_info) in enumerate(batch):
+            global_idx = batch_idx * BATCH_CONFIG['batch_size'] + idx + 1
+
+            print(f"\n[{global_idx}/{self.stats['total']}] {corp.corp_name} ({corp.stock_code})")
+
+            success = self._process_single_corp_with_report(corp, report_info)
+
+            if success:
+                self.stats["success"] += 1
+            elif success is None:
+                self.stats["skipped"] += 1
+            else:
+                self.stats["failed"] += 1
+                self.failed_corps.append({
+                    "corp_name": corp.corp_name,
+                    "stock_code": corp.stock_code,
+                    "corp_code": corp.corp_code
+                })
+
+            # 요청 간 딜레이
+            time.sleep(BATCH_CONFIG['request_delay_sec'])
+
+    def _process_single_corp_with_report(self, corp, report_info) -> Optional[bool]:
+        """
+        단일 기업 처리 (사전 검색된 보고서 정보 활용)
+
+        Args:
+            corp: 기업 객체
+            report_info: 사전 검색된 Report 객체 (dart.filings.search 결과)
+
+        Returns:
+            True: 성공
+            False: 실패
+            None: 스킵
+        """
+        corp_name = corp.corp_name
+        corp_code = corp.corp_code
+        stock_code = corp.stock_code
+
+        try:
+            # Report 객체에서 정보 추출 (속성 접근)
+            rcept_no = getattr(report_info, 'rcp_no', None) or getattr(report_info, 'rcept_no', None)
+            report_nm = getattr(report_info, 'report_nm', 'Unknown')
+
+            print(f"   📄 보고서: {report_nm}")
+
+            # 이미 Report 객체를 가지고 있으므로 직접 사용
+            # 단, 상세 정보가 필요하면 get_annual_report로 다시 조회
+            report = self.agent.get_annual_report(corp_code)
+
+            if not report:
+                print(f"   ⚠️ 보고서 상세 조회 실패 - 스킵")
+                return None
+
+            # 2. 핵심 섹션 순차적 블록 추출
+            sections = self.agent.extract_target_sections_sequential(report)
+
+            if not sections:
+                print(f"   ⚠️ 추출 가능한 섹션 없음 - 스킵")
+                return None
+
+            # 3. DB 저장
+            with DBManager() as db:
+                # 기업 등록
+                company_id = db.insert_company(corp_name, corp_code, stock_code)
+                print(f"   🏢 기업 등록 완료 (ID: {company_id})")
+
+                # 리포트 등록 - Report 객체에서 정보 추출
+                report_meta = self.agent.get_report_info(report)
+                report_id = db.insert_report(company_id, report_meta)
+                print(f"   📋 리포트 등록 완료 (ID: {report_id})")
+
+                # 섹션별 블록 저장 (순차적 블록 처리)
+                total_blocks = 0
+                text_count = 0
+                table_count = 0
+
+                for section in sections:
+                    blocks = section.get('blocks', [])
+                    saved = db.insert_materials_batch(report_id, blocks)
+                    total_blocks += saved
+                    text_count += sum(1 for b in blocks if b['chunk_type'] == 'text')
+                    table_count += sum(1 for b in blocks if b['chunk_type'] == 'table')
+
+                print(f"   📥 {total_blocks}개 블록 저장 완료 (텍스트: {text_count}, 테이블: {table_count})")
+
+            return True
+
+        except Exception as e:
+            print(f"   ❌ 처리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     # ==================== 배치 처리 ====================
 

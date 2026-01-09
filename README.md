@@ -94,6 +94,32 @@ python main.py --all --reset    # DB 초기화 후 처리
 python main.py --all --limit 100  # 최대 100개 기업만 처리
 ```
 
+#### 효율 모드 (권장) ⚡
+사업보고서가 있는 기업만 일괄 검색하여 처리하는 효율적인 방식입니다.
+기존 방식보다 API 호출 횟수를 대폭 줄여 빠르게 실행됩니다.
+
+```bash
+# 기본 실행 (최근 3개월 사업보고서)
+python main.py --efficient
+
+# 기간 지정 (YYYYMMDD 형식)
+python main.py --efficient --bgn 20250101 --end 20250331
+
+# DB 초기화 후 실행
+python main.py --efficient --reset
+
+# 최대 처리 개수 제한 (테스트용)
+python main.py --efficient --limit 10
+
+# 조합 사용
+python main.py --efficient --bgn 20240101 --end 20241231 --reset --limit 50
+```
+
+**효율 모드 vs 기존 방식:**
+- **기존 방식 (`--all`)**: ~2,600개 상장사 전체 순회 → 각각 API 호출하여 보고서 확인
+- **효율 모드 (`--efficient`)**: 기간 내 사업보고서 일괄 검색 → 해당 기업만 처리
+- **결과**: API 호출 횟수 90% 이상 감소, 실행 시간 대폭 단축
+
 ### 2. 테스트 실행
 
 #### DB 테스트

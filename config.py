@@ -56,6 +56,9 @@ EMBEDDING_CONFIG = {
 # === 보고서 검색 설정 ===
 REPORT_SEARCH_CONFIG = {
     "bgn_de": "20240101",       # 검색 시작일 (YYYYMMDD)
-    "pblntf_detail_ty": "a001"  # 사업보고서 유형 코드
+    "pblntf_detail_ty": "a001", # 사업보고서 유형 코드
+    "page_count": 100,          # 한 페이지당 최대 건수 (기본값 10, 최대 100)
+    "page_delay_sec": 0.5,      # 페이지 간 API 호출 대기 (Rate Limiting)
+    "max_search_days": 90       # corp_code 없을 때 최대 검색 기간 (일) - 3개월
 }
 

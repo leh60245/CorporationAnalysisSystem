@@ -39,6 +39,18 @@ def run_all_mode(reset_db: bool = False):
     pipeline.run_all(reset_db=reset_db)
 
 
+def run_efficient_mode(reset_db: bool = False, limit: int = None, bgn_de: str = None, end_de: str = None):
+    """
+    효율 모드: 사업보고서가 있는 기업만 처리 (dart.filings.search 사용)
+
+    기존 방식보다 훨씬 빠름 - 전체 상장사 순회 대신 사업보고서 일괄 검색
+    """
+    from src.core.pipeline import DataPipeline
+
+    pipeline = DataPipeline()
+    pipeline.run_efficient(bgn_de=bgn_de, end_de=end_de, reset_db=reset_db, limit=limit)
+
+
 def run_explore_mode():
     """보고서 구조 탐색 모드"""
     from scripts.explore_report_structure import explore_report_structure
@@ -100,6 +112,8 @@ def main():
     python main.py --test                    # 테스트 모드 (3개 기업)
     python main.py --all                     # 전체 상장 기업
     python main.py --all --reset             # DB 초기화 후 전체 처리
+    python main.py --efficient               # 효율 모드 (사업보고서 있는 기업만)
+    python main.py --efficient --bgn 20250101 --end 20250331  # 기간 지정
     python main.py --codes 005930 000660     # 특정 종목코드만 처리
     python main.py --embed                   # 전체 임베딩 생성
     python main.py --embed --report-id 1     # 특정 리포트 임베딩
@@ -114,6 +128,8 @@ def main():
                             help='테스트 모드 (삼성전자, SK하이닉스, NAVER)')
     mode_group.add_argument('--all', action='store_true',
                             help='전체 상장 기업 처리')
+    mode_group.add_argument('--efficient', action='store_true',
+                            help='효율 모드 (사업보고서가 있는 기업만 일괄 검색)')
     mode_group.add_argument('--codes', nargs='+', metavar='CODE',
                             help='특정 종목코드 처리 (공백으로 구분)')
     mode_group.add_argument('--embed', action='store_true',
@@ -132,6 +148,10 @@ def main():
                         help='특정 리포트 ID (--embed와 함께 사용)')
     parser.add_argument('--batch-size', type=int, default=32,
                         help='임베딩 배치 크기 (기본: 32)')
+    parser.add_argument('--bgn', type=str, metavar='YYYYMMDD',
+                        help='검색 시작일 (--efficient와 함께 사용)')
+    parser.add_argument('--end', type=str, metavar='YYYYMMDD',
+                        help='검색 종료일 (--efficient와 함께 사용)')
 
     args = parser.parse_args()
 
@@ -145,6 +165,13 @@ def main():
                 pipeline.run(stock_codes=None, limit=args.limit, reset_db=args.reset)
             else:
                 run_all_mode(reset_db=args.reset)
+        elif args.efficient:
+            run_efficient_mode(
+                reset_db=args.reset,
+                limit=args.limit,
+                bgn_de=args.bgn,
+                end_de=args.end
+            )
         elif args.codes:
             run_custom_mode(args.codes, reset_db=args.reset)
         elif args.embed:
