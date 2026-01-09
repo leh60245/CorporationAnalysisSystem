@@ -185,7 +185,6 @@ DB_NAME=your_database
 DB_USER=postgres
 DB_PASSWORD=your_password
 DB_PORT=5432
-```
 
 ## 사용법
 
@@ -215,6 +214,11 @@ python main.py --stats
 ### 보고서 구조 탐색
 ```bash
 python main.py --explore
+```
+
+### DB 추가
+```bash
+python -c "from src.core.db_manager import DBManager; db = DBManager(); db.__enter__(); db.init_db(); db.__exit__(None, None, None); print('DONE')"
 ```
 
 ## 핵심 섹션
@@ -272,11 +276,6 @@ python main.py --explore
 | meta_info | JSONB | 메타 정보 (토큰, 처리시간 등) |
 | model_name | VARCHAR(50) | 사용된 AI 모델 (기본: gpt-4o) |
 | created_at | TIMESTAMP | 생성 일시 |
-| chunk_index | INTEGER | 청크 순서 |
-| raw_content | TEXT | 텍스트 내용 |
-| **tables_json** | **JSONB** | **테이블 데이터** (분리 저장) |
-| embedding | vector(768) | 임베딩 벡터 (pgvector) |
-| metadata | JSONB | 추가 메타데이터 |
 
 ## 🎯 핵심 섹션
 
